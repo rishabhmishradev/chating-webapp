@@ -2,12 +2,14 @@ import React, { useState, useEffect, useRef } from "react";
 import { ref, push, serverTimestamp, update, onValue } from "firebase/database";
 import { rtdb } from "../firebase/config";
 import { Send, MessageCircle, Smile, Check, CheckCheck } from "lucide-react";
+import { deleteMessage as softDeleteMessage } from "../utils/messageActions";
 
-const ChatRoom = ({ currentUser, isOnline, messages }) => {
+const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
   const [newMessage, setNewMessage] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
+  const [otherUserPresence, setOtherUserPresence] = useState(null);
 
   const scrollToBottom = (behavior = "auto") => {
     if (messagesEndRef.current) {
@@ -25,6 +27,19 @@ const ChatRoom = ({ currentUser, isOnline, messages }) => {
   useEffect(() => {
     scrollToBottom("auto");
   }, [messages]);
+
+  // Determine other user (assumes 1:1 chat with known names in usersMap)
+  useEffect(() => {
+    if (!currentUser) return;
+    const names = Object.keys(usersMap || {});
+    const others = names.filter((n) => n !== currentUser.name);
+    if (others.length > 0) {
+      const other = usersMap[others[0]];
+      setOtherUserPresence(other || null);
+    } else {
+      setOtherUserPresence(null);
+    }
+  }, [usersMap, currentUser]);
 
   // Mark messages as read when they come into view
   useEffect(() => {
@@ -122,6 +137,23 @@ const ReadReceipt = ({ status }) => {
 
   return (
     <div className="flex flex-col h-screen bg-black">
+      {/* Header with other user's presence */}
+      <div className="px-4 py-2 border-b border-zinc-800 bg-zinc-900/60 text-zinc-200">
+        <div className="flex items-center justify-between">
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold">
+              {otherUserPresence?.name || "Chat"}
+            </span>
+            <span className="text-xs text-zinc-400">
+              {otherUserPresence?.isOnline
+                ? "Online"
+                : otherUserPresence?.lastSeen
+                ? `Last seen ${new Date(otherUserPresence.lastSeen).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                : ""}
+            </span>
+          </div>
+        </div>
+      </div>
       <div
         ref={messagesContainerRef}
         className="flex-1 overflow-y-auto p-4 bg-gradient-to-b from-zinc-900 to-black"
@@ -156,6 +188,12 @@ const ReadReceipt = ({ status }) => {
                         ? "bg-gradient-to-r from-amber-500 to-yellow-600 text-black"
                         : "bg-gradient-to-r from-zinc-800 to-zinc-700 text-white border border-zinc-600"
                     }`}
+                    onContextMenu={(e) => {
+                      if (message.sender === currentUser?.name) {
+                        e.preventDefault();
+                        softDeleteMessage(message.id);
+                      }
+                    }}
                   >
                     {message.sender !== currentUser?.name && (
                       <p className="text-xs font-semibold text-amber-400 mb-2 tracking-wide">
@@ -190,6 +228,11 @@ const ReadReceipt = ({ status }) => {
                         </div>
                       )}
                     </div>
+                    {message.sender === currentUser?.name && (
+                      <div className="mt-1 text-[10px] text-zinc-500 select-none">
+                        Right-click to Unsend
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
