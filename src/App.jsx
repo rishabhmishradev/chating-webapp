@@ -15,6 +15,7 @@ const App = () => {
   const [messages, setMessages] = useState([]);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [userPresence, setUserPresence] = useState({ isOnline: false, lastSeen: null });
+  const [usersMap, setUsersMap] = useState({});
   const [gameStates, setGameStates] = useState({
     rps: { scores: { player1: 0, player2: 0 } },
     tictactoe: {
@@ -88,6 +89,16 @@ const App = () => {
     return () => unsubscribe();
   }, [currentUser]);
 
+  // ✅ Subscribe to all users for showing others' last seen
+  useEffect(() => {
+    const usersRef = ref(rtdb, "users");
+    const unsubscribe = onValue(usersRef, (snapshot) => {
+      const data = snapshot.val() || {};
+      setUsersMap(data);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // ✅ Mark offline with lastSeen on tab close/refresh
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -150,6 +161,7 @@ const App = () => {
             currentUser={currentUser}
             isOnline={isOnline}
             messages={messages}
+            usersMap={usersMap}
           />
         )}
         {activeSection === "games" && (
