@@ -10,6 +10,11 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const [otherUserPresence, setOtherUserPresence] = useState(null);
+  const [unsendHintSeen, setUnsendHintSeen] = useState(
+    typeof window !== "undefined" && localStorage.getItem("unsendHintSeen") === "1"
+  );
+  const longPressTimerRef = useRef(null);
+  const longPressTargetRef = useRef(null);
 
   const scrollToBottom = (behavior = "auto") => {
     if (messagesEndRef.current) {
@@ -113,6 +118,33 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
 
   const emojiList = ["😊", "😂", "❤️", "👍", "🎉", "🔥", "💯", "🤔", "😍", "🥳"];
 
+  const handleUnsend = (message) => {
+    if (!message || message.sender !== currentUser?.name) return;
+    const ok = window.confirm("Unsend this message?");
+    if (!ok) return;
+    softDeleteMessage(message.id);
+    if (!unsendHintSeen) {
+      setUnsendHintSeen(true);
+      try { localStorage.setItem("unsendHintSeen", "1"); } catch {}
+    }
+  };
+
+  const handleTouchStart = (message) => {
+    if (message.sender !== currentUser?.name) return;
+    longPressTargetRef.current = message;
+    longPressTimerRef.current = setTimeout(() => {
+      handleUnsend(longPressTargetRef.current);
+    }, 600);
+  };
+
+  const clearLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+      longPressTargetRef.current = null;
+    }
+  };
+
  // Read Receipt Icon Component
 const ReadReceipt = ({ status }) => {
   const baseClasses = "w-5 h-5"; // Make it bigger
@@ -191,9 +223,13 @@ const ReadReceipt = ({ status }) => {
                     onContextMenu={(e) => {
                       if (message.sender === currentUser?.name) {
                         e.preventDefault();
-                        softDeleteMessage(message.id);
+                        handleUnsend(message);
                       }
                     }}
+                    onTouchStart={() => handleTouchStart(message)}
+                    onTouchEnd={clearLongPress}
+                    onTouchCancel={clearLongPress}
+                    onTouchMove={clearLongPress}
                   >
                     {message.sender !== currentUser?.name && (
                       <p className="text-xs font-semibold text-amber-400 mb-2 tracking-wide">
@@ -228,9 +264,9 @@ const ReadReceipt = ({ status }) => {
                         </div>
                       )}
                     </div>
-                    {message.sender === currentUser?.name && (
+                    {message.sender === currentUser?.name && !unsendHintSeen && (
                       <div className="mt-1 text-[10px] text-zinc-500 select-none">
-                        Right-click to Unsend
+                        Right-click or long-press to Unsend
                       </div>
                     )}
                   </div>
