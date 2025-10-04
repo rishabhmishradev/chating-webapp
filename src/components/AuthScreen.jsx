@@ -27,7 +27,7 @@ const AuthScreen = ({ setCurrentUser, isOnline }) => {
       const userRef = ref(rtdb, `users/${name}`);
       set(userRef, {
         name,
-        lastSeen: serverTimestamp(),
+        lastSeen: Date.now(),
         isOnline: true,
       });
     } else {
