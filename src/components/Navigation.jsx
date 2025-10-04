@@ -1,10 +1,33 @@
 import React, { useState } from "react";
 import { LogOut, MessageCircle, Gamepad2, Palette, Menu, X } from "lucide-react";
-import { ref, set, serverTimestamp } from "firebase/database";
+import { ref, set, serverTimestamp, onValue } from "firebase/database";
 import { rtdb } from "../firebase/config";
 
-const Navigation = ({ currentUser, setCurrentUser, setActiveSection, activeSection, userPresence }) => {
+const Navigation = ({ currentUser, setCurrentUser, setActiveSection, activeSection, userPresence, usersMap = {} }) => {
   const [open, setOpen] = useState(false);
+  const [typingUsers, setTypingUsers] = useState({});
+  
+  // Get other user's presence (for 1:1 chat)
+  const otherUser = React.useMemo(() => {
+    if (!currentUser) return null;
+    const names = Object.keys(usersMap || {});
+    const others = names.filter((n) => n !== currentUser.name);
+    return others.length > 0 ? usersMap[others[0]] : null;
+  }, [usersMap, currentUser]);
+
+  // Subscribe to typing indicators
+  React.useEffect(() => {
+    if (!currentUser) return;
+
+    const typingRef = ref(rtdb, "typing");
+    const unsubscribe = onValue(typingRef, (snapshot) => {
+      const data = snapshot.val() || {};
+      console.log("Navigation - Typing data received:", data);
+      setTypingUsers(data);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
 
   const handleLogout = () => {
     if (currentUser?.name) {
@@ -12,7 +35,7 @@ const Navigation = ({ currentUser, setCurrentUser, setActiveSection, activeSecti
       set(userRef, {
         name: currentUser.name,
         isOnline: false,
-        lastSeen: serverTimestamp(),
+        lastSeen: Date.now(),
       });
     }
     localStorage.removeItem("chatUser");
@@ -52,7 +75,30 @@ const Navigation = ({ currentUser, setCurrentUser, setActiveSection, activeSecti
           {/* Left: Brand / Menu */}
           <div className="flex items-center gap-3">
             {/* Brand */}
-            <div className="text-lg font-semibold tracking-wide">Penguin</div>
+            <div className="flex items-center gap-2">
+              <div className="text-lg font-semibold tracking-wide">Penguin</div>
+              {otherUser && (
+                <div className="text-xs text-gray-400">
+                  {(() => {
+                    // Check if other user is typing
+                    const isTyping = typingUsers[otherUser.name]?.isTyping;
+                    const typingTime = typingUsers[otherUser.name]?.timestamp || 0;
+                    const now = Date.now();
+                    const isRecentTyping = isTyping && (now - typingTime <= 5000);
+                    
+                    if (isRecentTyping) {
+                      return `${otherUser.name} is typing...`;
+                    } else if (otherUser.isOnline) {
+                      return `${otherUser.name} is Online`;
+                    } else if (otherUser.lastSeen) {
+                      return `${otherUser.name} last seen ${new Date(otherUser.lastSeen).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+                    } else {
+                      return `${otherUser.name} is Offline`;
+                    }
+                  })()}
+                </div>
+              )}
+            </div>
 
             {/* Desktop nav */}
             <div className="hidden md:flex items-center gap-8 ml-6">
@@ -66,13 +112,15 @@ const Navigation = ({ currentUser, setCurrentUser, setActiveSection, activeSecti
           <div className="hidden md:flex items-center gap-5">
             <div className="flex items-center gap-3 bg-gray-800 px-4 py-1.5 rounded-full shadow">
               <span className="text-sm font-medium text-gray-200">{currentUser?.name}</span>
-              <span className="text-xs text-gray-400">
-                {userPresence?.isOnline
-                  ? "Online"
-                  : userPresence?.lastSeen
-                  ? `Last seen ${new Date(userPresence.lastSeen).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                  : "Offline"}
-              </span>
+              {otherUser && (
+                <span className="text-xs text-gray-400">
+                  {otherUser.isOnline
+                    ? `${otherUser.name} is Online`
+                    : otherUser.lastSeen
+                    ? `${otherUser.name} last seen ${new Date(otherUser.lastSeen).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                    : `${otherUser.name} is Offline`}
+                </span>
+              )}
             </div>
             <button
               onClick={handleLogout}
@@ -111,13 +159,27 @@ const Navigation = ({ currentUser, setCurrentUser, setActiveSection, activeSecti
             <div className="mt-4 flex items-center justify-between">
               <div className="flex items-center gap-2 bg-gray-800 px-3 py-1.5 rounded-full">
                 <span className="text-sm font-medium text-gray-200">{currentUser?.name}</span>
-                <span className="text-xs text-gray-400">
-                  {userPresence?.isOnline
-                    ? "Online"
-                    : userPresence?.lastSeen
-                    ? `Last seen ${new Date(userPresence.lastSeen).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                    : "Offline"}
-                </span>
+                {otherUser && (
+                  <span className="text-xs text-gray-400">
+                    {(() => {
+                      // Check if other user is typing
+                      const isTyping = typingUsers[otherUser.name]?.isTyping;
+                      const typingTime = typingUsers[otherUser.name]?.timestamp || 0;
+                      const now = Date.now();
+                      const isRecentTyping = isTyping && (now - typingTime <= 5000);
+                      
+                      if (isRecentTyping) {
+                        return `${otherUser.name} is typing...`;
+                      } else if (otherUser.isOnline) {
+                        return `${otherUser.name} is Online`;
+                      } else if (otherUser.lastSeen) {
+                        return `${otherUser.name} last seen ${new Date(otherUser.lastSeen).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+                      } else {
+                        return `${otherUser.name} is Offline`;
+                      }
+                    })()}
+                  </span>
+                )}
               </div>
               <button
                 onClick={handleLogout}
