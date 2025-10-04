@@ -89,6 +89,39 @@ const App = () => {
     return () => unsubscribe();
   }, [currentUser]);
 
+  // ✅ Heartbeat to keep user online while active
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const userRef = ref(rtdb, `users/${currentUser.name}`);
+    
+    // Update online status immediately
+    set(userRef, {
+      name: currentUser.name,
+      isOnline: true,
+      lastSeen: Date.now(),
+    });
+
+    // Keep user online with periodic heartbeat
+    const heartbeatInterval = setInterval(() => {
+      set(userRef, {
+        name: currentUser.name,
+        isOnline: true,
+        lastSeen: Date.now(),
+      });
+    }, 30000); // Update every 30 seconds
+
+    return () => {
+      clearInterval(heartbeatInterval);
+      // Set offline when component unmounts
+      set(userRef, {
+        name: currentUser.name,
+        isOnline: false,
+        lastSeen: Date.now(),
+      });
+    };
+  }, [currentUser]);
+
   // ✅ Subscribe to all users for showing others' last seen
   useEffect(() => {
     const usersRef = ref(rtdb, "users");
@@ -108,7 +141,7 @@ const App = () => {
       set(userRef, {
         name: currentUser.name,
         isOnline: false,
-        lastSeen: serverTimestamp(),
+        lastSeen: Date.now(),
       });
     };
 
@@ -153,6 +186,7 @@ const App = () => {
         activeSection={activeSection}
         isOnline={isOnline}
         userPresence={userPresence}
+        usersMap={usersMap}
       />
 
       <main className="flex-1 flex flex-col overflow-hidden">
