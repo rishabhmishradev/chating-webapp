@@ -15,6 +15,8 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
   );
   const longPressTimerRef = useRef(null);
   const longPressTargetRef = useRef(null);
+  const [typingUsers, setTypingUsers] = useState({});
+  const typingTimeoutRef = useRef(null);
 
   const scrollToBottom = (behavior = "auto") => {
     if (messagesEndRef.current) {
@@ -45,6 +47,20 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
       setOtherUserPresence(null);
     }
   }, [usersMap, currentUser]);
+
+  // Subscribe to typing indicators
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const typingRef = ref(rtdb, "typing");
+    const unsubscribe = onValue(typingRef, (snapshot) => {
+      const data = snapshot.val() || {};
+      console.log("Typing data received:", data);
+      setTypingUsers(data);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
 
   // Mark messages as read when they come into view
   useEffect(() => {
@@ -114,6 +130,58 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
   const addEmoji = (emoji) => {
     setNewMessage(newMessage + emoji);
     setShowEmojiPicker(false);
+  };
+
+  // Handle typing indicator
+  const handleTyping = (text) => {
+    console.log("handleTyping called with:", text, "currentUser:", currentUser?.name);
+    setNewMessage(text);
+    
+    if (!currentUser) {
+      console.log("No current user, returning");
+      return;
+    }
+    
+    const typingRef = ref(rtdb, `typing/${currentUser.name}`);
+    
+    if (text.trim()) {
+      // User is typing
+      console.log(`${currentUser.name} is typing...`);
+      console.log("Writing to Firebase path:", `typing/${currentUser.name}`);
+      set(typingRef, {
+        isTyping: true,
+        timestamp: Date.now(),
+      }).then(() => {
+        console.log("Successfully wrote typing status to Firebase");
+      }).catch((error) => {
+        console.error("Error writing typing status:", error);
+      });
+      
+      // Clear previous timeout
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      // Set timeout to stop typing indicator after 3 seconds
+      typingTimeoutRef.current = setTimeout(() => {
+        console.log(`${currentUser.name} stopped typing`);
+        set(typingRef, {
+          isTyping: false,
+          timestamp: Date.now(),
+        });
+      }, 3000);
+    } else {
+      // User stopped typing
+      console.log(`${currentUser.name} stopped typing (empty)`);
+      set(typingRef, {
+        isTyping: false,
+        timestamp: Date.now(),
+      });
+      
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    }
   };
 
   const emojiList = ["😊", "😂", "❤️", "👍", "🎉", "🔥", "💯", "🤔", "😍", "🥳"];
@@ -309,7 +377,7 @@ const ReadReceipt = ({ status }) => {
             <input
               type="text"
               value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
+              onChange={(e) => handleTyping(e.target.value)}
               onKeyPress={(e) => e.key === "Enter" && sendMessage()}
               placeholder={isOnline ? "Type a message..." : "No connection"}
               disabled={!isOnline}
@@ -339,6 +407,31 @@ const ReadReceipt = ({ status }) => {
             </div>
           </div>
         )}
+        
+        {/* Typing indicator */}
+        {console.log("Rendering typing indicator, typingUsers:", typingUsers, "currentUser:", currentUser?.name)}
+        {Object.keys(typingUsers).map((userName) => {
+          console.log("Checking user:", userName, "isTyping:", typingUsers[userName]?.isTyping);
+          if (userName === currentUser?.name || !typingUsers[userName]?.isTyping) return null;
+          
+          // Check if typing is recent (within 5 seconds)
+          const typingTime = typingUsers[userName]?.timestamp || 0;
+          const now = Date.now();
+          if (now - typingTime > 5000) return null;
+          
+          return (
+            <div key={userName} className="flex items-center justify-center mt-2">
+              <div className="flex items-center space-x-2 text-xs text-amber-400">
+                <div className="flex space-x-1">
+                  <div className="w-1 h-1 bg-amber-400 rounded-full animate-bounce"></div>
+                  <div className="w-1 h-1 bg-amber-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                  <div className="w-1 h-1 bg-amber-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                </div>
+                <span>{userName} is typing...</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
