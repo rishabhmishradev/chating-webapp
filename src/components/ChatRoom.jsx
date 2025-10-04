@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { ref, push, serverTimestamp, update, onValue } from "firebase/database";
+import { ref, push, serverTimestamp, update, onValue, set } from "firebase/database";
 import { rtdb } from "../firebase/config";
 import { Send, MessageCircle, Smile, Check, CheckCheck } from "lucide-react";
 import { deleteMessage as softDeleteMessage } from "../utils/messageActions";
@@ -35,7 +35,7 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
     scrollToBottom("auto");
   }, [messages]);
 
-  // Determine other user (assumes 1:1 chat with known names in usersMap)
+  // Determine other user
   useEffect(() => {
     if (!currentUser) return;
     const names = Object.keys(usersMap || {});
@@ -55,19 +55,34 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
     const typingRef = ref(rtdb, "typing");
     const unsubscribe = onValue(typingRef, (snapshot) => {
       const data = snapshot.val() || {};
-      console.log("Typing data received:", data);
       setTypingUsers(data);
     });
 
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Mark messages as read when they come into view
+  // Cleanup typing indicator on unmount
+  useEffect(() => {
+    return () => {
+      if (currentUser) {
+        const typingRef = ref(rtdb, `typing/${currentUser.name}`);
+        set(typingRef, {
+          isTyping: false,
+          timestamp: Date.now(),
+        }).catch((err) => console.error("Error clearing typing:", err));
+        
+        if (typingTimeoutRef.current) {
+          clearTimeout(typingTimeoutRef.current);
+        }
+      }
+    };
+  }, [currentUser]);
+
+  // Mark messages as read
   useEffect(() => {
     if (!currentUser || !messages.length) return;
 
     messages.forEach((message) => {
-      // Only mark others' messages as read
       if (message.sender !== currentUser.name && message.status !== "read") {
         const messageRef = ref(rtdb, `messages/${message.id}`);
         update(messageRef, {
@@ -81,14 +96,26 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
   const sendMessage = async () => {
     if (newMessage.trim() && currentUser && isOnline) {
       try {
+        // Clear typing indicator immediately
+        const typingRef = ref(rtdb, `typing/${currentUser.name}`);
+        await set(typingRef, {
+          isTyping: false,
+          timestamp: Date.now(),
+        });
+        
+        if (typingTimeoutRef.current) {
+          clearTimeout(typingTimeoutRef.current);
+        }
+
         const messagesRef = ref(rtdb, "messages");
         await push(messagesRef, {
           text: newMessage,
           sender: currentUser.name,
           timestamp: serverTimestamp(),
           createdAt: new Date().toISOString(),
-          status: "sent", // Initial status
+          status: "sent",
         });
+        
         setNewMessage("");
         setShowEmojiPicker(false);
 
@@ -104,7 +131,7 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
     }
   };
 
-  // Simulate delivery status after 1 second
+  // Simulate delivery status
   useEffect(() => {
     if (!currentUser) return;
 
@@ -132,51 +159,39 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
     setShowEmojiPicker(false);
   };
 
-  // Handle typing indicator
+  // Handle typing indicator with debounce
   const handleTyping = (text) => {
-    console.log("handleTyping called with:", text, "currentUser:", currentUser?.name);
     setNewMessage(text);
     
-    if (!currentUser) {
-      console.log("No current user, returning");
-      return;
-    }
+    if (!currentUser) return;
     
     const typingRef = ref(rtdb, `typing/${currentUser.name}`);
     
     if (text.trim()) {
       // User is typing
-      console.log(`${currentUser.name} is typing...`);
-      console.log("Writing to Firebase path:", `typing/${currentUser.name}`);
       set(typingRef, {
         isTyping: true,
         timestamp: Date.now(),
-      }).then(() => {
-        console.log("Successfully wrote typing status to Firebase");
-      }).catch((error) => {
-        console.error("Error writing typing status:", error);
-      });
+      }).catch((err) => console.error("Error setting typing:", err));
       
       // Clear previous timeout
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
       
-      // Set timeout to stop typing indicator after 3 seconds
+      // Set timeout to stop typing indicator after 2 seconds
       typingTimeoutRef.current = setTimeout(() => {
-        console.log(`${currentUser.name} stopped typing`);
         set(typingRef, {
           isTyping: false,
           timestamp: Date.now(),
-        });
-      }, 3000);
+        }).catch((err) => console.error("Error clearing typing timeout:", err));
+      }, 2000);
     } else {
-      // User stopped typing
-      console.log(`${currentUser.name} stopped typing (empty)`);
+      // User stopped typing (empty input)
       set(typingRef, {
         isTyping: false,
         timestamp: Date.now(),
-      });
+      }).catch((err) => console.error("Error clearing typing:", err));
       
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
@@ -213,31 +228,33 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
     }
   };
 
- // Read Receipt Icon Component
-const ReadReceipt = ({ status }) => {
-  const baseClasses = "w-5 h-5"; // Make it bigger
-  if (status === "read") {
-    return (
-      <div className="flex items-center space-x-1">
-        <CheckCheck className={`${baseClasses} text-green-400`} />
-      </div>
-    );
-  }
-  if (status === "delivered") {
-    return (
-      <div className="flex items-center space-x-1">
-        <CheckCheck className={`${baseClasses} text-zinc-400`} />
-      </div>
-    );
-  }
-  // sent
-  return <Check className={`${baseClasses} text-zinc-400`} />;
-};
+  // Read Receipt Icon Component
+  const ReadReceipt = ({ status }) => {
+    const baseClasses = "w-4 h-4";
+    if (status === "read") {
+      return <CheckCheck className={`${baseClasses} text-green-400`} />;
+    }
+    if (status === "delivered") {
+      return <CheckCheck className={`${baseClasses} text-zinc-400`} />;
+    }
+    return <Check className={`${baseClasses} text-zinc-400`} />;
+  };
 
+  // Check if someone is typing (excluding current user)
+  const someoneIsTyping = Object.keys(typingUsers).some((userName) => {
+    if (userName === currentUser?.name) return false;
+    const userTyping = typingUsers[userName];
+    if (!userTyping?.isTyping) return false;
+    
+    // Check if typing is recent (within 5 seconds)
+    const typingTime = userTyping.timestamp || 0;
+    const now = Date.now();
+    return (now - typingTime) <= 5000;
+  });
 
   return (
     <div className="flex flex-col h-screen bg-black">
-      {/* Header with other user's presence */}
+      {/* Header */}
       <div className="px-4 py-2 border-b border-zinc-800 bg-zinc-900/60 text-zinc-200">
         <div className="flex items-center justify-between">
           <div className="flex flex-col">
@@ -245,7 +262,9 @@ const ReadReceipt = ({ status }) => {
               {otherUserPresence?.name || "Chat"}
             </span>
             <span className="text-xs text-zinc-400">
-              {otherUserPresence?.isOnline
+              {someoneIsTyping
+                ? "typing..."
+                : otherUserPresence?.isOnline
                 ? "Online"
                 : otherUserPresence?.lastSeen
                 ? `Last seen ${new Date(otherUserPresence.lastSeen).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
@@ -254,20 +273,17 @@ const ReadReceipt = ({ status }) => {
           </div>
         </div>
       </div>
+
+      {/* Messages */}
       <div
         ref={messagesContainerRef}
         className="flex-1 overflow-y-auto p-4 bg-gradient-to-b from-zinc-900 to-black"
-        style={{
-          scrollBehavior: "auto",
-          overflowAnchor: "none",
-        }}
+        style={{ scrollBehavior: "auto", overflowAnchor: "none" }}
       >
         {messages.length === 0 ? (
           <div className="text-center text-zinc-400 mt-32">
             <MessageCircle className="w-16 h-16 mx-auto mb-4 opacity-30" />
-            <h3 className="text-xl font-semibold mb-2 text-zinc-300">
-              No messages yet
-            </h3>
+            <h3 className="text-xl font-semibold mb-2 text-zinc-300">No messages yet</h3>
             <p className="text-zinc-500">Start the conversation ✨</p>
           </div>
         ) : (
@@ -276,9 +292,7 @@ const ReadReceipt = ({ status }) => {
               <div
                 key={message.id}
                 className={`flex ${
-                  message.sender === currentUser?.name
-                    ? "justify-end"
-                    : "justify-start"
+                  message.sender === currentUser?.name ? "justify-end" : "justify-start"
                 }`}
               >
                 <div className="max-w-xs sm:max-w-sm lg:max-w-md">
@@ -304,28 +318,20 @@ const ReadReceipt = ({ status }) => {
                         {message.sender}
                       </p>
                     )}
-                    <p className="text-sm leading-relaxed mb-2">
-                      {message.text}
-                    </p>
+                    <p className="text-sm leading-relaxed mb-2">{message.text}</p>
                     <div className="flex items-center justify-between">
                       <p
                         className={`text-xs opacity-70 ${
-                          message.sender === currentUser?.name
-                            ? "text-black"
-                            : "text-zinc-400"
+                          message.sender === currentUser?.name ? "text-black" : "text-zinc-400"
                         }`}
                       >
                         {message.createdAt
-                          ? new Date(message.createdAt).toLocaleTimeString(
-                              [],
-                              {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              }
-                            )
+                          ? new Date(message.createdAt).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
                           : "Sending..."}
                       </p>
-                      {/* Show read receipt only for sender's messages */}
                       {message.sender === currentUser?.name && (
                         <div className="ml-2">
                           <ReadReceipt status={message.status || "sent"} />
@@ -334,7 +340,7 @@ const ReadReceipt = ({ status }) => {
                     </div>
                     {message.sender === currentUser?.name && !unsendHintSeen && (
                       <div className="mt-1 text-[10px] text-zinc-500 select-none">
-                        Right-click or long-press to Unsend
+                        Long-press to Unsend
                       </div>
                     )}
                   </div>
@@ -383,11 +389,6 @@ const ReadReceipt = ({ status }) => {
               disabled={!isOnline}
               className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-all disabled:opacity-50"
             />
-            {newMessage && (
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>
-              </div>
-            )}
           </div>
 
           <button
@@ -407,31 +408,6 @@ const ReadReceipt = ({ status }) => {
             </div>
           </div>
         )}
-        
-        {/* Typing indicator */}
-        {console.log("Rendering typing indicator, typingUsers:", typingUsers, "currentUser:", currentUser?.name)}
-        {Object.keys(typingUsers).map((userName) => {
-          console.log("Checking user:", userName, "isTyping:", typingUsers[userName]?.isTyping);
-          if (userName === currentUser?.name || !typingUsers[userName]?.isTyping) return null;
-          
-          // Check if typing is recent (within 5 seconds)
-          const typingTime = typingUsers[userName]?.timestamp || 0;
-          const now = Date.now();
-          if (now - typingTime > 5000) return null;
-          
-          return (
-            <div key={userName} className="flex items-center justify-center mt-2">
-              <div className="flex items-center space-x-2 text-xs text-amber-400">
-                <div className="flex space-x-1">
-                  <div className="w-1 h-1 bg-amber-400 rounded-full animate-bounce"></div>
-                  <div className="w-1 h-1 bg-amber-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                  <div className="w-1 h-1 bg-amber-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-                </div>
-                <span>{userName} is typing...</span>
-              </div>
-            </div>
-          );
-        })}
       </div>
     </div>
   );
