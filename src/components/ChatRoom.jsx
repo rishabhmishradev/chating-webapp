@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { ref, push, serverTimestamp, update, onValue, set } from "firebase/database";
+import { ref, push, serverTimestamp, update, onValue, set } from "firebase/database"; // ✅ 'set' added
 import { rtdb } from "../firebase/config";
 import { Send, MessageCircle, Smile, Check, CheckCheck } from "lucide-react";
 import { deleteMessage as softDeleteMessage } from "../utils/messageActions";
@@ -61,7 +61,7 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Cleanup typing indicator on unmount
+  // ✅ Cleanup typing on unmount
   useEffect(() => {
     return () => {
       if (currentUser) {
@@ -96,7 +96,7 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
   const sendMessage = async () => {
     if (newMessage.trim() && currentUser && isOnline) {
       try {
-        // Clear typing indicator immediately
+        // ✅ Clear typing immediately when sending
         const typingRef = ref(rtdb, `typing/${currentUser.name}`);
         await set(typingRef, {
           isTyping: false,
@@ -159,7 +159,7 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
     setShowEmojiPicker(false);
   };
 
-  // Handle typing indicator with debounce
+  // ✅ Handle typing with proper cleanup
   const handleTyping = (text) => {
     setNewMessage(text);
     
@@ -179,15 +179,15 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
         clearTimeout(typingTimeoutRef.current);
       }
       
-      // Set timeout to stop typing indicator after 2 seconds
+      // Stop typing after 2 seconds
       typingTimeoutRef.current = setTimeout(() => {
         set(typingRef, {
           isTyping: false,
           timestamp: Date.now(),
-        }).catch((err) => console.error("Error clearing typing timeout:", err));
+        }).catch((err) => console.error("Error clearing typing:", err));
       }, 2000);
     } else {
-      // User stopped typing (empty input)
+      // Empty input - stop typing
       set(typingRef, {
         isTyping: false,
         timestamp: Date.now(),
@@ -228,7 +228,6 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
     }
   };
 
-  // Read Receipt Icon Component
   const ReadReceipt = ({ status }) => {
     const baseClasses = "w-4 h-4";
     if (status === "read") {
@@ -240,13 +239,11 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
     return <Check className={`${baseClasses} text-zinc-400`} />;
   };
 
-  // Check if someone is typing (excluding current user)
+  // Check if someone is typing
   const someoneIsTyping = Object.keys(typingUsers).some((userName) => {
     if (userName === currentUser?.name) return false;
     const userTyping = typingUsers[userName];
     if (!userTyping?.isTyping) return false;
-    
-    // Check if typing is recent (within 5 seconds)
     const typingTime = userTyping.timestamp || 0;
     const now = Date.now();
     return (now - typingTime) <= 5000;
@@ -284,7 +281,7 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
           <div className="text-center text-zinc-400 mt-32">
             <MessageCircle className="w-16 h-16 mx-auto mb-4 opacity-30" />
             <h3 className="text-xl font-semibold mb-2 text-zinc-300">No messages yet</h3>
-            <p className="text-zinc-500">Start the conversation ✨</p>
+            <p className="text-zinc-500">Start the conversation</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -352,7 +349,7 @@ const ChatRoom = ({ currentUser, isOnline, messages, usersMap = {} }) => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Section */}
+      {/* Input */}
       <div className="p-4 bg-zinc-900">
         {showEmojiPicker && (
           <div className="mb-4 p-3 bg-zinc-800 rounded-xl border border-zinc-700">
